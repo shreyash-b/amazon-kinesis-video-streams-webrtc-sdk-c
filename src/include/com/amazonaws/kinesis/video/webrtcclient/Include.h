@@ -1679,6 +1679,7 @@ typedef struct {
  */
 typedef struct {
     RTC_RTP_TRANSCEIVER_DIRECTION direction; //!< Transceiver direction - SENDONLY, RECVONLY, SENDRECV
+    UINT32 maxLatency;                       //!< Max latency in hundreds of nanoseconds
 } RtcRtpTransceiverInit, *PRtcRtpTransceiverInit;
 
 /**
