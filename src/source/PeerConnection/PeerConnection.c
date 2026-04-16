@@ -1410,7 +1410,9 @@ STATUS setRemoteDescription(PRtcPeerConnection pPeerConnection, PRtcSessionDescr
     CHK_STATUS(deserializeSessionDescription(pSessionDescription, pSessionDescriptionInit->sdp));
 
     for (i = 0; i < pSessionDescription->sessionAttributesCount; i++) {
-        if (STRCMP(pSessionDescription->sdpAttributes[i].attributeName, "fingerprint") == 0) {
+        if (STRCMP(pSessionDescription->sdpAttributes[i].attributeName, "fingerprint") == 0 &&
+            pKvsPeerConnection->remoteCertificateFingerprint[0] == '\0') {
+            /* Keep the first fingerprint when multiple are advertised (see RFC 8122 §5). */
             STRNCPY(pKvsPeerConnection->remoteCertificateFingerprint, pSessionDescription->sdpAttributes[i].attributeValue + 8,
                     CERTIFICATE_FINGERPRINT_LENGTH);
         } else if (pKvsPeerConnection->isOffer && STRCMP(pSessionDescription->sdpAttributes[i].attributeName, "setup") == 0) {
@@ -1441,7 +1443,12 @@ STATUS setRemoteDescription(PRtcPeerConnection pPeerConnection, PRtcSessionDescr
             } else if (STRCMP(pSessionDescription->mediaDescriptions[i].sdpAttributes[j].attributeName, "candidate") == 0) {
                 // Ignore the return value, we have candidates we don't support yet like TURN
                 iceAgentAddRemoteCandidate(pKvsPeerConnection->pIceAgent, pSessionDescription->mediaDescriptions[i].sdpAttributes[j].attributeValue);
-            } else if (STRCMP(pSessionDescription->mediaDescriptions[i].sdpAttributes[j].attributeName, "fingerprint") == 0) {
+            } else if (STRCMP(pSessionDescription->mediaDescriptions[i].sdpAttributes[j].attributeName, "fingerprint") == 0 &&
+                       pKvsPeerConnection->remoteCertificateFingerprint[0] == '\0') {
+                /* RFC 8122 §5: SDP may advertise multiple fingerprints (one per hash algorithm).
+                 * Keep the first one we see; dtlsSessionVerifyRemoteCertificateFingerprint
+                 * infers the hash algorithm from its length. Overwriting would truncate a
+                 * stronger hash (e.g. SHA-512 = 191 chars > CERTIFICATE_FINGERPRINT_LENGTH). */
                 STRNCPY(pKvsPeerConnection->remoteCertificateFingerprint,
                         pSessionDescription->mediaDescriptions[i].sdpAttributes[j].attributeValue + 8, CERTIFICATE_FINGERPRINT_LENGTH);
             } else if (pKvsPeerConnection->isOffer &&

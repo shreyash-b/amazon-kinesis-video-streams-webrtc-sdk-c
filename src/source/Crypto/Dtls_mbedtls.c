@@ -493,16 +493,62 @@ STATUS dtlsSessionVerifyRemoteCertificateFingerprint(PDtlsSession pDtlsSession, 
     ENTERS();
     STATUS retStatus = STATUS_SUCCESS;
     CHAR actualFingerprint[CERTIFICATE_FINGERPRINT_LENGTH];
+    BYTE rawHash[MBEDTLS_MD_MAX_SIZE];
+    PCHAR pWrite = NULL;
+    const mbedtls_md_info_t* pMdInfo = NULL;
+    mbedtls_md_type_t mdType = MBEDTLS_MD_SHA256;
+    UINT32 hashSize = 0;
+    INT32 sslRet, i;
     mbedtls_x509_crt* pRemoteCertificate = NULL;
     BOOL locked = FALSE;
 
     CHK(pDtlsSession != NULL && pExpectedFingerprint != NULL, STATUS_NULL_ARG);
 
+    /* Infer the hash algorithm from the expected fingerprint's length.
+     * WebRTC (RFC 8122) permits any IANA-registered hash; peers commonly pick
+     * one based on their certificate's signature algorithm, so we must match
+     * whatever the remote chose, not hardcode SHA-256.
+     *
+     * String length = N bytes * 3 - 1 (uppercase hex pairs with ':' separators). */
+    switch ((INT32) STRLEN(pExpectedFingerprint)) {
+        case 20 * 3 - 1:
+            mdType = MBEDTLS_MD_SHA1;
+            break;
+        case 28 * 3 - 1:
+            mdType = MBEDTLS_MD_SHA224;
+            break;
+        case 32 * 3 - 1:
+            mdType = MBEDTLS_MD_SHA256;
+            break;
+        case 48 * 3 - 1:
+            mdType = MBEDTLS_MD_SHA384;
+            break;
+        case 64 * 3 - 1:
+            mdType = MBEDTLS_MD_SHA512;
+            break;
+        default:
+            DLOGW("Unrecognized fingerprint length %d, defaulting to SHA-256", (int) STRLEN(pExpectedFingerprint));
+            mdType = MBEDTLS_MD_SHA256;
+            break;
+    }
+
     MUTEX_LOCK(pDtlsSession->sslLock);
     locked = TRUE;
 
     CHK((pRemoteCertificate = (mbedtls_x509_crt*) mbedtls_ssl_get_peer_cert(&pDtlsSession->sslCtx)) != NULL, STATUS_INTERNAL_ERROR);
-    CHK_STATUS(dtlsCertificateFingerprint(pRemoteCertificate, actualFingerprint));
+
+    pMdInfo = mbedtls_md_info_from_type(mdType);
+    CHK(pMdInfo != NULL, STATUS_INTERNAL_ERROR);
+    sslRet = mbedtls_md(pMdInfo, pRemoteCertificate->raw.p, pRemoteCertificate->raw.len, rawHash);
+    CHK(sslRet == 0, STATUS_INTERNAL_ERROR);
+    hashSize = mbedtls_md_get_size(pMdInfo);
+
+    pWrite = actualFingerprint;
+    for (i = 0; i < (INT32) hashSize; i++) {
+        SPRINTF(pWrite, "%.2X:", rawHash[i]);
+        pWrite += 3;
+    }
+    *(pWrite - 1) = '\0';
 
     CHK(STRCMP(pExpectedFingerprint, actualFingerprint) == 0, STATUS_SSL_REMOTE_CERTIFICATE_VERIFICATION_FAILED);
 
